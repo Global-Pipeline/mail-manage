@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.py[cod]
+data/mail.db
+data/mail.db-wal
+data/mail.db-shm
+data/attachments/*
+!data/attachments/.gitkeep

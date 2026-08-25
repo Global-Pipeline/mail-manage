@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Zhanyi Mail</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="brand-panel">
+      <div class="brand-mark">ZM</div>
+      <div>
+        <h1>Zhanyi Mail</h1>
+        <p>Customer correspondence</p>
+      </div>
+    </section>
+    <form class="login-form" id="loginForm">
+      <div class="login-heading">
+        <span>ZHANYI METAL</span>
+        <h2>邮箱管理后台</h2>
+      </div>
+      <label>账号<input name="username" autocomplete="username" required autofocus></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="form-error" id="loginError"></p>
+      <button class="primary full" type="submit">登录</button>
+    </form>
+  </main>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = event.currentTarget.querySelector('button');
+      const error = document.getElementById('loginError');
+      button.disabled = true; error.textContent = '';
+      const data = Object.fromEntries(new FormData(event.currentTarget));
+      const response = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+      const body = await response.json();
+      if (response.ok) location.reload();
+      else { error.textContent = body.error || '登录失败'; button.disabled = false; }
+    });
+  </script>
+</body>
+</html>

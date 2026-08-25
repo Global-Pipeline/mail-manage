@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Zhanyi Mail</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand"><span class="brand-mark small">ZM</span><div><strong>Zhanyi Mail</strong><span>{{ from_email }}</span></div></div>
+      <button class="primary compose-nav" data-view="compose"><i data-lucide="square-pen"></i><span>写邮件</span></button>
+      <nav>
+        <button class="nav-item active" data-view="inbox"><i data-lucide="inbox"></i><span>收件箱</span><b id="inboxCount"></b></button>
+        <button class="nav-item" data-view="forwarding"><i data-lucide="forward"></i><span>自动抄送</span><b id="forwardingCount"></b></button>
+        <button class="nav-item" data-view="sent"><i data-lucide="send"></i><span>已发送</span><b id="sentCount"></b></button>
+        <button class="nav-item" data-view="campaigns"><i data-lucide="layers-3"></i><span>批量任务</span><b id="campaignCount"></b></button>
+        <button class="nav-item" data-view="lead-imports"><i data-lucide="file-spreadsheet"></i><span>批量解析</span><b id="leadImportCount"></b></button>
+        <button class="nav-item" data-view="contacts"><i data-lucide="contact-round"></i><span>联系人</span><b id="contactCount"></b></button>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="nav-item" data-view="settings"><i data-lucide="settings"></i><span>设置</span></button>
+        <button class="nav-item" id="logoutButton"><i data-lucide="log-out"></i><span>退出</span></button>
+      </div>
+    </aside>
+    <main class="workspace">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="menuButton" title="菜单"><i data-lucide="menu"></i></button>
+        <div class="page-title"><span id="pageEyebrow">MAILBOX</span><h1 id="pageTitle">收件箱</h1></div>
+        <div class="top-actions">
+          <label class="search-box"><i data-lucide="search"></i><input id="globalSearch" placeholder="搜索"></label>
+          <button class="icon-button" id="refreshButton" title="刷新"><i data-lucide="refresh-cw"></i></button>
+        </div>
+      </header>
+      <section class="content" id="content"></section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop"><div class="modal" id="modal"></div></div>
+  <div class="toast-stack" id="toastStack"></div>
+
+  <template id="mailListTemplate">
+    <div class="list-toolbar"><div class="segmented"><button data-filter="all" class="active">全部</button><button data-filter="attention">需关注</button></div><span class="muted" id="listMeta"></span></div>
+    <div class="mail-list" id="mailList"></div>
+  </template>
+
+  <script src="/static/vendor/lucide.min.js"></script>
+  <script>window.ZHANYI_FROM={{ from_email|tojson }};</script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

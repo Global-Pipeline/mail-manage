@@ -103,6 +103,35 @@ class LeadImportApiTests(unittest.TestCase):
         self.assertEqual(history.status_code, 200)
         self.assertEqual(len(history.json), 2)
 
+    def test_adds_selected_leads_as_deduplicated_contacts(self):
+        imported = self.upload()
+        import_id = imported.json["id"]
+        record_ids = [record["id"] for record in imported.json["records"]]
+
+        first = self.client.post(
+            f"/api/lead-imports/{import_id}/contacts",
+            json={"record_ids": record_ids},
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json["created"], 2)
+        self.assertEqual(first.json["existing"], 0)
+        self.assertEqual(first.json["skipped"], 1)
+
+        contacts = self.client.get("/api/contacts").json
+        self.assertEqual({contact["email"] for contact in contacts}, {"amy@example.com", "sales@example.com"})
+        amy = next(contact for contact in contacts if contact["email"] == "amy@example.com")
+        self.assertEqual((amy["first_name"], amy["last_name"]), ("Amy", "Lee"))
+        self.assertEqual(amy["company"], "Example Fasteners")
+        self.assertIn("采购经理", amy["notes"])
+
+        second = self.client.post(
+            f"/api/lead-imports/{import_id}/contacts",
+            json={"record_ids": record_ids},
+        )
+        self.assertEqual(second.json["created"], 0)
+        self.assertEqual(second.json["existing"], 2)
+        self.assertEqual(second.json["skipped"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

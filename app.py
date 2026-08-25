@@ -444,6 +444,27 @@ def serialize_lead_import(row):
     return item
 
 
+def split_lead_contact_name(value):
+    parts = clean_cell(value).split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+def lead_contact_notes(row):
+    fields = (
+        ("职位", row["title"]),
+        ("国家/地区", row["country"]),
+        ("产品", row["product"]),
+        ("电话", row["phone"]),
+        ("官网", row["website"]),
+        ("匹配理由", row["match_reason"]),
+    )
+    return "\n".join(f"{label}：{value}" for label, value in fields if value)
+
+
 def json_list(value):
     if isinstance(value, list):
         return value
@@ -1272,6 +1293,94 @@ def create_lead_import():
             ],
         )
     return get_lead_import(import_id), 201
+
+
+@app.post("/api/lead-imports/<int:import_id>/contacts")
+@login_required
+def add_leads_to_contacts(import_id):
+    data = request.get_json(silent=True) or {}
+    record_ids = sorted(
+        {int(value) for value in data.get("record_ids", []) if str(value).isdigit()}
+    )
+    if not record_ids:
+        return api_error("请至少选择一条解析结果")
+    if len(record_ids) > MAX_LEAD_ROWS:
+        return api_error(f"单次最多添加 {MAX_LEAD_ROWS} 条线索")
+    placeholders = ",".join("?" for _ in record_ids)
+    now = utcnow()
+    created = existing = skipped = 0
+    processed_emails = set()
+    with db() as conn:
+        batch = conn.execute("SELECT id FROM lead_imports WHERE id=?", (import_id,)).fetchone()
+        if not batch:
+            return api_error("解析记录不存在", 404)
+        rows = conn.execute(
+            f"SELECT * FROM lead_records WHERE import_id=? AND id IN ({placeholders}) ORDER BY source_row",
+            [import_id, *record_ids],
+        ).fetchall()
+        for row in rows:
+            emails = [clean_email(value) for value in json.loads(row["emails_json"] or "[]")]
+            emails = list(dict.fromkeys(value for value in emails if value))
+            if not emails:
+                skipped += 1
+                continue
+            first_name, last_name = split_lead_contact_name(row["contact_name"])
+            notes = lead_contact_notes(row)
+            for email in emails:
+                if email in processed_emails:
+                    continue
+                processed_emails.add(email)
+                contact = conn.execute("SELECT id FROM contacts WHERE email=?", (email,)).fetchone()
+                if contact:
+                    conn.execute(
+                        """
+                        UPDATE contacts SET
+                            first_name=CASE WHEN first_name='' THEN ? ELSE first_name END,
+                            last_name=CASE WHEN last_name='' THEN ? ELSE last_name END,
+                            company=CASE WHEN company='' THEN ? ELSE company END,
+                            tags=CASE WHEN tags='' THEN ? ELSE tags END,
+                            notes=CASE WHEN notes='' THEN ? ELSE notes END,
+                            updated_at=?
+                        WHERE id=?
+                        """,
+                        (
+                            first_name,
+                            last_name,
+                            row["company"],
+                            row["product"],
+                            notes,
+                            now,
+                            contact["id"],
+                        ),
+                    )
+                    existing += 1
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO contacts(
+                        email,first_name,last_name,company,tags,notes,status,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,'active',?,?)
+                    """,
+                    (
+                        email,
+                        first_name,
+                        last_name,
+                        row["company"],
+                        row["product"],
+                        notes,
+                        now,
+                        now,
+                    ),
+                )
+                created += 1
+    return jsonify(
+        {
+            "selected_rows": len(rows),
+            "created": created,
+            "existing": existing,
+            "skipped": skipped + max(0, len(record_ids) - len(rows)),
+        }
+    )
 
 
 @app.get("/api/messages")

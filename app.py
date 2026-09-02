@@ -22,6 +22,7 @@ from html import escape as html_escape, unescape
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import bleach
 from flask import Flask, Response, jsonify, redirect, render_template, request, session
@@ -40,6 +41,7 @@ FROM_NAME = "Zhanyi Metal"
 RESEND_API_URL = "https://api.resend.com"
 DEFAULT_SILICONFLOW_URL = "https://api.siliconflow.cn/v1"
 DEFAULT_AI_MODEL = "deepseek-ai/DeepSeek-V3.2"
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 ALLOWED_ATTACHMENT_BYTES = 20 * 1024 * 1024
 ALLOWED_LEAD_FILE_BYTES = 10 * 1024 * 1024
@@ -76,6 +78,24 @@ _login_attempts = {}
 
 def utcnow():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def parse_beijing_schedule(value):
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("请选择定时发送时间")
+    try:
+        scheduled = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError("定时发送时间格式不正确") from exc
+    if scheduled.tzinfo is None:
+        scheduled = scheduled.replace(tzinfo=BEIJING_TZ)
+    else:
+        scheduled = scheduled.astimezone(BEIJING_TZ)
+    scheduled_utc = scheduled.astimezone(timezone.utc)
+    if scheduled_utc <= datetime.now(timezone.utc):
+        raise ValueError("定时发送时间必须晚于当前北京时间")
+    return scheduled_utc.isoformat(timespec="seconds")
 
 
 @contextmanager
@@ -123,6 +143,7 @@ def init_db():
                 total_count INTEGER NOT NULL DEFAULT 0,
                 sent_count INTEGER NOT NULL DEFAULT 0,
                 failed_count INTEGER NOT NULL DEFAULT 0,
+                scheduled_at TEXT,
                 created_at TEXT NOT NULL,
                 started_at TEXT,
                 completed_at TEXT
@@ -264,6 +285,8 @@ def init_db():
             )
         if "template_id" not in campaign_columns:
             conn.execute("ALTER TABLE campaigns ADD COLUMN template_id INTEGER")
+        if "scheduled_at" not in campaign_columns:
+            conn.execute("ALTER TABLE campaigns ADD COLUMN scheduled_at TEXT")
         recipient_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(campaign_recipients)").fetchall()
         }
@@ -1071,13 +1094,27 @@ def campaign_worker():
         try:
             with db() as conn:
                 row = conn.execute(
-                    "SELECT id FROM campaign_recipients WHERE status='queued' ORDER BY id LIMIT 1"
+                    """
+                    SELECT r.id, r.campaign_id
+                    FROM campaign_recipients r
+                    JOIN campaigns c ON c.id=r.campaign_id
+                    WHERE r.status='queued'
+                      AND (c.scheduled_at IS NULL OR datetime(c.scheduled_at) <= datetime('now'))
+                    ORDER BY r.id LIMIT 1
+                    """
                 ).fetchone()
                 if row:
                     recipient_id = row["id"]
                     conn.execute(
                         "UPDATE campaign_recipients SET status='processing' WHERE id=? AND status='queued'",
                         (recipient_id,),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE campaigns SET status='sending', started_at=COALESCE(started_at, ?)
+                        WHERE id=? AND status IN ('queued','scheduled')
+                        """,
+                        (utcnow(), row["campaign_id"]),
                     )
             if recipient_id:
                 send_queued_recipient(recipient_id)
@@ -1184,7 +1221,7 @@ def summary():
         sent = conn.execute("SELECT COUNT(*) n FROM messages WHERE direction='outbound'").fetchone()["n"]
         contacts = conn.execute("SELECT COUNT(*) n FROM contacts WHERE status='active'").fetchone()["n"]
         active = conn.execute(
-            "SELECT COUNT(*) n FROM campaigns WHERE status IN ('queued','sending')"
+            "SELECT COUNT(*) n FROM campaigns WHERE status IN ('queued','scheduled','sending')"
         ).fetchone()["n"]
         forwarding_rules = conn.execute("SELECT COUNT(*) n FROM forwarding_rules").fetchone()["n"]
         lead_imports = conn.execute("SELECT COUNT(*) n FROM lead_imports").fetchone()["n"]
@@ -1802,6 +1839,13 @@ def create_campaign():
     source = "bulk" if str(data.get("source", "")).strip().lower() == "bulk" else "compose"
     ai_optimize = 1 if data.get("ai_optimize") else 0
     template_id = int(data["template_id"]) if str(data.get("template_id", "")).isdigit() else None
+    send_mode = str(data.get("send_mode", "immediate")).strip().lower()
+    scheduled_at = None
+    if source == "bulk" and send_mode == "scheduled":
+        try:
+            scheduled_at = parse_beijing_schedule(data.get("scheduled_at_beijing"))
+        except ValueError as exc:
+            return api_error(str(exc))
     contact_ids = sorted({int(value) for value in data.get("contact_ids", []) if str(value).isdigit()})
     extra_emails = sorted({clean_email(value) for value in data.get("extra_emails", []) if clean_email(value)})
     if not subject or not html_body:
@@ -1841,8 +1885,8 @@ def create_campaign():
             return api_error("请至少选择一个有效收件人")
         cur = conn.execute(
             """
-            INSERT INTO campaigns(name,from_email,subject,html_body,text_body,status,total_count,source,ai_optimize,template_id,created_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO campaigns(name,from_email,subject,html_body,text_body,status,total_count,source,ai_optimize,template_id,scheduled_at,created_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 str(data.get("name") or subject).strip(),
@@ -1850,11 +1894,12 @@ def create_campaign():
                 subject,
                 html_body,
                 str(data.get("text_body", "")),
-                "queued",
+                "scheduled" if scheduled_at else "queued",
                 len(recipients),
                 source,
                 ai_optimize,
                 template_id,
+                scheduled_at,
                 utcnow(),
             ),
         )
@@ -1899,6 +1944,7 @@ def create_campaign():
             "id": campaign_id,
             "recipient_count": len(recipients),
             "contacts_created": created_contacts,
+            "scheduled_at": scheduled_at,
         }
     ), 201
 

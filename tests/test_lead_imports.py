@@ -24,7 +24,7 @@ def workbook_bytes():
             "美国",
             "紧固件",
             "采购岗位与产品匹配",
-            "amy@example.com; sales@example.com",
+            "amy@example.com sales@example.com AMY@example.com",
             "+1 555 0100",
             "https://example.com",
         ]

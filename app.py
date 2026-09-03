@@ -352,9 +352,14 @@ def lead_header_lookup():
 def split_lead_emails(value):
     result = []
     for item in re.split(r"[,;，；\n]+", clean_cell(value)):
-        email = clean_email(item)
-        if email and email not in result:
-            result.append(email)
+        # Preserve display-name addresses containing spaces, while also accepting
+        # spreadsheet cells where multiple plain addresses are separated only by
+        # spaces (clean_cell normalizes embedded newlines to spaces).
+        candidates = re.split(r"\s+", item) if item.count("@") > 1 else [item]
+        for candidate in candidates:
+            email = clean_email(candidate)
+            if email and email not in result:
+                result.append(email)
     return result
 
 

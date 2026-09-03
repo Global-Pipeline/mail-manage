@@ -37,6 +37,22 @@ def workbook_bytes():
 
 
 class LeadParserTests(unittest.TestCase):
+    def test_splits_space_and_newline_separated_emails(self):
+        self.assertEqual(
+            mail_app.split_lead_emails(
+                "one@example.com two@example.com\nthree@example.com"
+            ),
+            ["one@example.com", "two@example.com", "three@example.com"],
+        )
+
+    def test_preserves_display_name_and_removes_duplicates(self):
+        self.assertEqual(
+            mail_app.split_lead_emails(
+                "Sales Team <Sales@Example.com>; sales@example.com"
+            ),
+            ["sales@example.com"],
+        )
+
     def test_parses_template_and_splits_multiple_emails(self):
         parsed = mail_app.parse_lead_upload("leads.xlsx", workbook_bytes())
 
